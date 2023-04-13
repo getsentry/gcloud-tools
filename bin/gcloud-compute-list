@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+
+: token lasts for 1h. we can use service accounts if we need longer...
+export GOOGLE_OAUTH_ACCESS_TOKEN
+GOOGLE_OAUTH_ACCESS_TOKEN="${GOOGLE_OAUTH_ACCESS_TOKEN:-"$(gcloud auth print-access-token)"}"
+
+# the full name of a service has four parts, for example:
+#   projects/188831838813/services/$service.googleapis.com
+
+curl -sSL \
+  'https://compute.googleapis.com/compute/v1/projects/dicd-buckevan-cd/zones/us-west1-b/instances' \
+  -H "Authorization: Bearer $GOOGLE_OAUTH_ACCESS_TOKEN" \
+  -H 'Accept: application/json' \
+  --compressed

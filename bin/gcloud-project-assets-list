@@ -1,0 +1,8 @@
+#!/bin/bash
+set -eu
+project="${1:-$(gcloud config get project)}"
+
+set -x
+gcloud asset list --project="$project" --format=json |
+  # ancestors is always a list of one -- the project
+  jq '.[] | del(.ancestors)' -c

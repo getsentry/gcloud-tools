@@ -1,0 +1,23 @@
+#!/bin/zsh
+# This uses the exact same machinery as `gcloud logging read --freshness` to
+# compute an absolute timestamp from a relative specification.
+#
+# See also: gcloud topic datetimes
+###
+set -eu
+default="${2:-1d}"
+freshness="${1:-"$default"}"
+
+gcloud-python - "$freshness" <<PYTHON
+from sys import argv
+freshness = argv[1]
+
+from googlecloudsdk.calliope import arg_parsers
+seconds_ago = arg_parsers.Duration()(freshness)
+
+from datetime import datetime, timedelta
+now = datetime.now().astimezone()
+result = now - timedelta(seconds=seconds_ago)
+
+print(result.isoformat())
+PYTHON

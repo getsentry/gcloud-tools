@@ -1,0 +1,71 @@
+#!/bin/zsh
+set -eu
+
+project_id="$(gcloud config get project)"
+
+# exclude logs that are noisy and un-actionable
+log_filter='
+  -log_name="projects/'"$project_id"'/logs/container.googleapis.com%2Fcluster-autoscaler-visibility"
+  -log_name="projects/'"$project_id"'/logs/compute.googleapis.com%2Ffirewall"
+  -labels."authorization.k8s.io/decision"="allow"
+  -textPayload=~"^jvm \d+ +\|.* \tat "
+  -(
+    logName = "projects/'"$project_id"'/logs/compute.googleapis.com%2Ffirewall"
+    jsonPayload.disposition="ALLOWED"
+  )
+  -(
+    logName="projects/'"$project_id"'/logs/cloudaudit.googleapis.com%2Fdata_access"
+    severity<ERROR OR protoPayload.status.message:"k8s-ingress-svc-acct-permission-check-probe'\'' was not found"
+  )
+'
+
+json_to_jq() {
+  # Convert the huge-single-list output of gcloud logging into a
+  # stream-parseable newline-delimited json stream. It's not "ndjson" since
+  # that format requires single-line json.
+  # currently this is "good enough" for use with `gcloud --format=json`
+  sed -r '
+    # delete first two columns of characters
+    s/^.{1,2}//
+
+    # remove top-level trailing comma
+    s/^([]}]),$/\1/
+
+    # skip (now) blank lines
+    /^$/ d
+  '
+}
+
+main() {
+  if [[ "$#" -eq 0 ]]; then
+    set -- 15m  # default args
+  fi
+  freshness="$1"
+  shift 1
+
+  ( # the log is upside-down by default; fix it with --order-asc
+    # but the freshness option silently does nothing when using --order=asc
+    # so we have to make our own freshness filter
+    freshness_timestamp="$(gcloud-freshness-timestamp "$freshness")"
+    echo >&2 FILTER: "$* $log_filter timestamp>=\"$freshness_timestamp\""
+    set -x
+    gcloud alpha logging read \
+      --format=json \
+      "$* $log_filter timestamp>=\"$freshness_timestamp\"" \
+      --order=asc \
+    ;
+    CLOUDSDK_PYTHON_SITEPACKAGES=1 \
+      gcloud alpha logging tail \
+      --format=json \
+      --buffer-window=10s \
+      "$* $log_filter" \
+    ;
+
+  ) |
+     json_to_jq |
+     gcloud-logging-json-to-messages \
+   ;
+}
+
+set -x
+main "$@"

@@ -1,0 +1,10 @@
+#!/bin/zsh
+# start a python matching the one `gcloud` uses
+set -eu
+PYTHONPATH="$(
+  gcloud info --format=json |
+    jq '.installation.python_path | join(":")' -r
+)" \
+  "$(gcloud info --format=json | jq '.basic.python_location' -r)" \
+  "$@" \
+;  # Obviously.

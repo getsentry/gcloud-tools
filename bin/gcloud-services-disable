@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+
+: token lasts for 1h. we can use service accounts if we need longer...
+export GOOGLE_OAUTH_ACCESS_TOKEN
+GOOGLE_OAUTH_ACCESS_TOKEN="${GOOGLE_OAUTH_ACCESS_TOKEN:-"$(gcloud auth print-access-token)"}"
+
+# the full name of a service has four parts, for example:
+#   projects/188831838813/services/$service.googleapis.com
+service="${1:-$service}"
+
+curl -sSL -X POST \
+    --data "" \
+    -H "Authorization: Bearer $GOOGLE_OAUTH_ACCESS_TOKEN" \
+    -H "Content-Type: application/json; charset=utf-8" \
+    "https://serviceusage.googleapis.com/v1/$service:disable" |
+  jq .name -r |
+  # don't wait on noops
+  grep -Ev '^(operations/noop\.DONE_OPERATION|null)$' |
+  xargs -tr gcloud services operations wait \
+;

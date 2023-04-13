@@ -1,0 +1,7 @@
+#!/bin/bash
+set -eu
+
+echo '# This script only prints commands. Pipe to `sh` to commit.'
+echo 'set -x'
+gcloud-services-list |
+  xargs -rn1 echo gcloud-services-disable

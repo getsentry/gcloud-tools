@@ -1,0 +1,26 @@
+#!/bin/sh
+set -eu
+
+gcloud-asset-list |
+  jq '
+select(
+  (
+    .assetType
+    | IN(
+      "serviceusage.googleapis.com/Service",
+      "cloudresourcemanager.googleapis.com/Project",
+      "cloudbilling.googleapis.com/ProjectBillingInfo"
+    )
+  ) or (
+    .name
+    | split("/")[2:]
+    | join("/")
+    | IN(
+      "locations/global/buckets/_Default",
+      "locations/global/buckets/_Required",
+      "sinks/_Default",
+      "sinks/_Required"
+    )
+  )
+  | not
+)'
