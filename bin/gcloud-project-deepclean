@@ -1,0 +1,110 @@
+#!/bin/bash
+set -eu
+project="$(gcloud config get project 2> >(grep -v '^Your active configuration is:' >&2))"
+
+echo '# This script only prints commands. Pipe to `sh` to commit.'
+echo 'set -x'
+
+# skipping these types on purpose:
+#cloudbilling.googleapis.com/ProjectBillingInfo
+#cloudresourcemanager.googleapis.com/Project
+#compute.googleapis.com/Project
+#logging.googleapis.com/LogBucket
+#logging.googleapis.com/LogSink
+
+gcloud-asset-list-type container.googleapis.com/NodePool |
+  xargs -rn1 echo gcloud -q container node-pools delete --zone ffs
+
+gcloud-asset-list-type container.googleapis.com/Cluster |
+  xargs -rn1 echo gcloud -q container clusters delete --zone ffs
+
+gcloud-asset-list-type networkmanagement.googleapis.com/ConnectivityTest |
+  xargs -rn1 echo gcloud -q network-management connectivity-tests delete
+
+### compute.googleapis.com/Route
+
+gcloud-asset-list-type servicedirectory.googleapis.com/Namespace |
+  xargs -rn1 echo gcloud -q service-directory namespaces delete
+
+gcloud-asset-list-type compute.googleapis.com/InstanceGroupManager |
+  xargs -rn1 echo gcloud -q compute instance-groups managed delete
+
+gcloud-asset-list-type compute.googleapis.com/InstanceGroup |
+  xargs -rn1 echo gcloud -q compute instance-groups unmanaged delete
+
+gcloud-asset-list-type compute.googleapis.com/Instance |
+  xargs -rn1 echo gcloud -q compute instances delete
+
+gcloud-asset-list-type compute.googleapis.com/SslCertificate |
+  xargs -rn1 echo gcloud -q compute ssl-certificates delete
+
+gcloud-asset-list-type compute.googleapis.com/Firewall |
+  xargs -rn1 echo gcloud -q compute firewall-rules delete
+
+
+# compute.googleapis.com/Subnetwork: delete only non-automatic subnets
+gcloud-asset-list-type compute.googleapis.com/Network |
+  xargs -rn1 gcloud compute networks describe --format=json |
+  jq 'select(.x_gcloud_subnet_mode == "CUSTOM") | .name' -r |
+  xargs -rn1 gcloud compute networks subnets list --format 'value(self_link)' --network |
+  xargs -rn1 echo gcloud -q compute networks subnets delete
+
+gcloud-asset-list-type compute.googleapis.com/Network |
+  xargs -rn1 echo gcloud -q compute networks delete
+
+gcloud-asset-list-type compute.googleapis.com/NetworkEndpointGroup |
+  xargs -rn1 echo gcloud -q compute network-endpoint-groups delete
+
+
+#      1 "Disk"
+gcloud-asset-list-type compute.googleapis.com/Disk |
+  xargs -rn1 echo gcloud -q compute disks delete
+
+# DNS zones need their entries deleted before they can be deleted
+# except not the SOA nor NS entries
+gcloud-asset-list-type dns.googleapis.com/ManagedZone |
+  xargs --replace sh -c '
+    zone="{}"
+    gcloud dns record-sets list --zone "$zone" --format json |
+      jq '\''.[] | select(IN(.type; "NS", "SOA") | not) | ["--type=", .type, " ", .name] | join("")'\'' -r |
+      xargs -rL1 echo gcloud -q dns record-sets delete --zone "$zone" \
+    ;
+    echo gcloud -q dns managed-zones delete "$zone"
+  '
+
+gcloud-asset-list-type serviceusage.googleapis.com/Service |
+  # leave gcloud-asset API on so that we can double-check cleanness
+  grep -v '/services/cloudasset\.googleapis\.com$' |
+  xargs -rn1 echo gcloud-services-disable \
+;
+
+# the serviceaccount asset is listed in its "unique id" form, but we want to
+# only include custom service accounts, and need the "email" name for that
+gcloud-asset-list-type iam.googleapis.com/ServiceAccount |
+  xargs -rn1 basename |
+  xargs -rn1 gcloud -q iam service-accounts describe --format=json |
+  jq '.email' -r  |
+  grep "@$project\\." |
+  xargs -rn1 echo gcloud -q iam service-accounts delete \
+;
+
+# remove any invented-here service accounts with IAM bindings
+gcloud projects get-iam-policy "$project" --format=json |
+  jq '[.bindings[] | .members[]] | unique[] | select(contains("@'"$project"'."))' |
+  xargs -rn1 echo gcloud -q iam service-accounts delete \
+;
+
+
+# remove iam bindings for deleted role accounts
+gcloud projects get-iam-policy "$project" --format=json |
+  jq '
+    .bindings[]
+    | .role as $role
+    | .members[]
+    | if startswith("deleted:")
+      then [ "--role=", $role, " --member=", .]
+      else empty
+      end
+    | join ("")
+  ' -r |
+  xargs -rL1 echo gcloud -q projects remove-iam-policy-binding "$project"

@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+asset_type="${1:-$asset_type}"
+
+gcloud-asset-list |
+  jq 'select(.assetType == "'"$asset_type"'") | .name' -r \
+;
